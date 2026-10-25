@@ -35,10 +35,10 @@ jobs:
       - name: Build iOS
         run: flutter build ios --release --no-codesign
 
-      - name: Create Payload directory and move Runner.app
+      - name: Create Payload directory and move the app bundle
         run: |
           mkdir -p build/ios/iphoneos/Payload
-          mv build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload
+          mv build/ios/iphoneos/*.app build/ios/iphoneos/Payload
 
       - name: Zip ipa
         run: |
