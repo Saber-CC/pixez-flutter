@@ -28,6 +28,7 @@
   "clear_completed_tasks": "Clear completed tasks",
   "clear_all_tasks": "Clear all tasks",
   "clear_all_tasks_message": "Delete all download tasks? This cannot be undone.",
+  "waiting_download": "Waiting to download",
   "clearn_cache": "Clear cache",
   "clearn_cache_hint": "Try this when you have problems with playing GIFs",
   "complete": "Complete",

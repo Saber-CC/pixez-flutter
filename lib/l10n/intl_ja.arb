@@ -28,6 +28,7 @@
   "clear_completed_tasks": "完了した処理を削除",
   "clear_all_tasks": "すべてのタスクを削除",
   "clear_all_tasks_message": "すべてのダウンロードタスクを削除しますか？この操作は元に戻せません。",
+  "waiting_download": "ダウンロード待ち",
   "clearn_cache": "キャッシュを削除",
   "clearn_cache_hint": "うごイラの再生に問題がある場合は、こちらをお試しください",
   "complete": "完了",

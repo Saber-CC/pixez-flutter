@@ -26,6 +26,7 @@
   "clear_completed_tasks": "Hapus tugas yang sudah selesai",
   "clear_all_tasks": "Hapus semua tugas",
   "clear_all_tasks_message": "Hapus semua tugas unduhan? Tindakan ini tidak dapat dibatalkan.",
+  "waiting_download": "Menunggu unduhan",
   "clearn_cache": "Bersihkan cache",
   "clearn_cache_hint": "Cobalah ini apabila mengalami masalah saat memutar GIF",
   "complete": "Selesai",

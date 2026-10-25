@@ -200,6 +200,20 @@ create table $tableAccount (
     return result;
   }
 
+  /// 按状态统计任务数量：0 seed / 1 进行中 / 2 完成 / 3 失败。
+  Future<Map<int, int>> countByStatus() async {
+    final rows = await db.rawQuery(
+      'select $columnStatus as status, count(*) as cnt from $tableAccount group by $columnStatus',
+    );
+    final result = <int, int>{};
+    for (final row in rows) {
+      final status = (row['status'] as num?)?.toInt() ?? 0;
+      final count = (row['cnt'] as num?)?.toInt() ?? 0;
+      result[status] = count;
+    }
+    return result;
+  }
+
   /// App 启动时把上次异常退出遗留的"保存中"任务退回 seed，方便重试。
   Future<int> resetRunning() async {
     final result = await db.update(

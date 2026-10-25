@@ -26,6 +26,7 @@
   "clear_completed_tasks": "I-clear ang mga kumpletong task",
   "clear_all_tasks": "I-clear ang lahat ng task",
   "clear_all_tasks_message": "I-delete ang lahat ng download task? Hindi na ito maibabalik.",
+  "waiting_download": "Naghihintay ng download",
   "clearn_cache": "I-clear ang cache",
   "clearn_cache_hint": "Subukan ito kung magkaproblema ka sa pag-play ng mga GIF",
   "complete": "Kumpleto",

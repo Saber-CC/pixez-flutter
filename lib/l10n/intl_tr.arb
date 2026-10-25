@@ -26,6 +26,7 @@
   "clear_completed_tasks": "Tamamlananları temizle",
   "clear_all_tasks": "Tüm görevleri sil",
   "clear_all_tasks_message": "Tüm indirme görevleri silinsin mi? Bu işlem geri alınamaz.",
+  "waiting_download": "İndirme bekliyor",
   "clearn_cache": "Önbelleği temizle",
   "clearn_cache_hint": "GIF'lerin oynatılmasıyla ilgili bir sorun yaşıyorsan bu seçeneği dene",
   "complete": "Tamamlanan",

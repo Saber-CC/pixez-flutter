@@ -28,6 +28,7 @@
   "clear_completed_tasks": "清空已完成任务",
   "clear_all_tasks": "清空所有任务",
   "clear_all_tasks_message": "删除所有下载任务？此操作无法撤销。",
+  "waiting_download": "等待下载",
   "clearn_cache": "清除缓存",
   "clearn_cache_hint": "如果播放动图反复出现问题可以尝试",
   "complete": "完成",

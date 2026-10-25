@@ -26,6 +26,7 @@
   "clear_completed_tasks": "Despejar tareas completadas",
   "clear_all_tasks": "Borrar todas las tareas",
   "clear_all_tasks_message": "¿Borrar todas las tareas de descarga? Esta acción no se puede deshacer.",
+  "waiting_download": "Esperando descarga",
   "clearn_cache": "Despejar el cache",
   "clearn_cache_hint": "Prueba esto quando tu tienos problemas con jugando GIFS",
   "complete": "Completo",

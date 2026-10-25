@@ -253,6 +253,9 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
     return IconButton(
         icon: Icon(Icons.more_vert),
         onPressed: () async {
+          // 打开菜单前先取一次各状态的数量，展示在菜单最上面。
+          final counts = await taskPersistProvider.countByStatus();
+          if (!mounted) return;
           await showModalBottomSheet(
               context: context,
               shape: RoundedRectangleBorder(
@@ -262,6 +265,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
                 return SafeArea(
                   child: Column(
                     children: <Widget>[
+                      _buildTaskSummary(counts),
                       ListTile(
                         title: Text(I18n.of(context).retry_failed_tasks),
                         onTap: () async {
@@ -297,6 +301,38 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
               });
           _refresh();
         });
+  }
+
+  /// 任务统计：全部 / 完成 / 等待下载 / 进行中 / 失败。
+  Widget _buildTaskSummary(Map<int, int> counts) {
+    final total = counts.values.fold<int>(0, (sum, value) => sum + value);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        children: [
+          _buildCountRow(I18n.of(context).all, total),
+          _buildCountRow(I18n.of(context).complete, counts[2] ?? 0),
+          _buildCountRow(I18n.of(context).waiting_download, counts[0] ?? 0),
+          _buildCountRow(I18n.of(context).running, counts[1] ?? 0),
+          _buildCountRow(I18n.of(context).failed, counts[3] ?? 0),
+          Divider(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCountRow(String label, int count) {
+    final style = Theme.of(context).textTheme.bodyMedium;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: style),
+          Text('$count', style: style?.copyWith(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
   }
 
   int currentIndex = 0;

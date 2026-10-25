@@ -26,6 +26,7 @@
   "clear_completed_tasks": "Abgeschlossene Aufgaben löschen",
   "clear_all_tasks": "Alle Aufgaben löschen",
   "clear_all_tasks_message": "Alle Download-Aufgaben löschen? Dies kann nicht rückgängig gemacht werden.",
+  "waiting_download": "Warten auf Download",
   "clearn_cache": "Cache leeren",
   "clearn_cache_hint": "Versuche dies, wenn GIFs nicht richtig abgespielt werden",
   "complete": "Fertig",

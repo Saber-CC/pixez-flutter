@@ -33,6 +33,7 @@ class JobPage extends StatefulWidget {
 
 class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   List<TaskPersist> _list = [];
+  Map<int, int> _counts = {};
   TaskPersistProvider taskPersistProvider = TaskPersistProvider();
   Timer? _timer;
   late AnimationController rotationController;
@@ -67,6 +68,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   initMethod() async {
     await taskPersistProvider.open();
     _refresh();
+    _loadCounts();
     _timer = Timer.periodic(Duration(seconds: 1), (time) {
       _fetchLocal();
     });
@@ -117,6 +119,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
         _list = results;
       });
     }
+    _loadCounts();
   }
 
   _reQueryFilter() async {
@@ -127,6 +130,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
         _list = results;
       });
     }
+    _loadCounts();
   }
 
   bool _nextLoading = false;
@@ -292,6 +296,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
                 setState(() {
                   _list = [];
                 });
+                _loadCounts();
               },
             )
           ],
@@ -301,6 +306,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildSummary(),
             _buildTopChip(),
             Expanded(child: _body()),
           ],
@@ -317,6 +323,36 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
 
   int currentIndex = 0;
   int _page = 0;
+
+  Future<void> _loadCounts() async {
+    try {
+      final counts = await taskPersistProvider.countByStatus();
+      if (!mounted) return;
+      setState(() {
+        _counts = counts;
+      });
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  /// 任务统计：全部 / 完成 / 等待下载 / 进行中 / 失败。
+  Widget _buildSummary() {
+    final total = _counts.values.fold<int>(0, (sum, value) => sum + value);
+    final style =
+        FluentTheme.of(context).typography.body?.copyWith(fontSize: 12);
+    return Padding(
+      padding: const EdgeInsets.only(left: 16.0, right: 16.0, bottom: 4.0),
+      child: Text(
+        '${I18n.of(context).all} $total · '
+        '${I18n.of(context).complete} ${_counts[2] ?? 0} · '
+        '${I18n.of(context).waiting_download} ${_counts[0] ?? 0} · '
+        '${I18n.of(context).running} ${_counts[1] ?? 0} · '
+        '${I18n.of(context).failed} ${_counts[3] ?? 0}',
+        style: style,
+      ),
+    );
+  }
 
   Widget _buildTopChip() {
     return SortGroup(
