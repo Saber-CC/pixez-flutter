@@ -366,6 +366,23 @@ abstract class _SaveStoreBase with Store {
     _joinQueue(url, illusts, fileName);
   }
 
+  /// 计算最终写入相册时使用的文件名（作者子目录 / sanity 子目录）。
+  String _galleryFileName(
+    String fileName,
+    String userName,
+    int userId,
+    int sanityLevel,
+  ) {
+    var name = fileName;
+    if (userSetting.singleFolder) {
+      name = "${userName.toLegal()}_$userId/$fileName";
+    }
+    if (userSetting.overSanityLevelFolder && sanityLevel > 2) {
+      name = "sanity/$fileName";
+    }
+    return name;
+  }
+
   Future<void> saveToGalleryWithUser(
     Uint8List uint8list,
     String userName,
@@ -379,27 +396,23 @@ abstract class _SaveStoreBase with Store {
         Platform.isWindows ||
         Platform.isLinux) {
       try {
-        String overFileName = fileName;
-        if (userSetting.singleFolder) {
-          String name = userName.toLegal();
-          String id = userId.toString();
-          fileName = "${name}_$id/$overFileName";
-        }
-        if (userSetting.overSanityLevelFolder && sanityLevel > 2) {
-          fileName = "sanity/$overFileName";
-        }
-
+        final target = _galleryFileName(
+          fileName,
+          userName,
+          userId,
+          sanityLevel,
+        );
         if (userSetting.isClearOldFormatFile)
           DocumentPlugin.save(
             uint8list,
-            fileName,
+            target,
             clearOld: userSetting.isClearOldFormatFile,
             createMillis: createMillis,
           );
         else
           DocumentPlugin.save(
             uint8list,
-            fileName,
+            target,
             createMillis: createMillis,
           );
       } catch (e) {
@@ -408,6 +421,56 @@ abstract class _SaveStoreBase with Store {
       return;
     } else {
       DocumentPlugin.save(uint8list, fileName, createMillis: createMillis);
+    }
+  }
+
+  /// 直接把磁盘上的文件交给原生层写入相册。
+  ///
+  /// 批量下载时图片一般已经在缓存里，保存几乎瞬间完成；如果每张都
+  /// `readAsBytes` 再经平台通道传一遍，Dart 堆和原生堆会各压一份图片，
+  /// 连续保存上千张就很容易被系统以内存超限杀掉。走路径就没有这个峰值。
+  /// 没有实现 saveFromPath 的平台（Windows / macOS）退回字节通道。
+  Future<void> saveFileToGallery(
+    String sourcePath,
+    Illusts illusts,
+    String fileName, {
+    String? sourceUrl,
+  }) async {
+    final pageIndex = sourceUrl == null ? 0 : pageIndexFromUrl(sourceUrl);
+    final createMillis = albumCreateMillis(
+      illusts.createDate,
+      pageIndex,
+      url: sourceUrl,
+    );
+    if (Platform.isIOS || Platform.isAndroid || Platform.isLinux) {
+      try {
+        DocumentPlugin.saveFromPath(
+          sourcePath,
+          _galleryFileName(
+            fileName,
+            illusts.user.name,
+            illusts.user.id,
+            illusts.sanityLevel,
+          ),
+          createMillis: createMillis,
+        );
+      } catch (e) {
+        print(e);
+      }
+      return;
+    }
+    try {
+      final uint8list = await File(sourcePath).readAsBytes();
+      await saveToGalleryWithUser(
+        uint8list,
+        illusts.user.name,
+        illusts.user.id,
+        illusts.sanityLevel,
+        fileName,
+        createMillis: createMillis,
+      );
+    } catch (e) {
+      print(e);
     }
   }
 

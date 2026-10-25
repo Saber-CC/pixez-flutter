@@ -241,9 +241,9 @@ class Fetcher {
     if (taskPersist == null) return;
     await taskPersistProvider.update(taskPersist..status = 2);
     File file = File(savePath + Platform.pathSeparator + fileName);
-    final uint8list = await file.readAsBytes();
-    await saveStore.saveToGallery(
-      uint8list,
+    // 直接把临时文件路径交给原生层，避免把整张图读进内存再过一遍平台通道。
+    await saveStore.saveFileToGallery(
+      file.path,
       illusts,
       fileName,
       sourceUrl: url,

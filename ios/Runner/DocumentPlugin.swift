@@ -25,6 +25,14 @@ struct DocumentPlugin {
                 save(sData, name: name, in: name.contains("sanity") ? "pxez_sanity" : "pxez", createMillis: createMillis)
                 result(true)
                 return
+            } else if call.method == "saveFromPath" {
+                let args = call.arguments as? [String:Any]
+                let sourcePath = args?["source_path"] as! String
+                let name = args?["name"] as! String
+                let createMillis = (args?["create_millis"] as? NSNumber)?.int64Value
+                saveFromPath(sourcePath, in: name.contains("sanity") ? "pxez_sanity" : "pxez", createMillis: createMillis)
+                result(true)
+                return
             } else if call.method == "permissionStatus" {
                 if #available(iOS 14, *) {
                     let readWriteStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -112,6 +120,36 @@ struct DocumentPlugin {
             return
         }
         
+        addAsset(fileUrl: fileUrl, assetCollection: assetCollection, createMillis: createMillis, deleteSourceWhenDone: true)
+    }
+    
+    /// 直接把磁盘上的文件交给 PhotoKit，不再把整张图的字节经 Flutter 通道传过来。
+    ///
+    /// 批量保存时每张图只会在 PhotoKit 里打开一次，Dart 堆和原生堆都不用
+    /// 各留一份，缓存命中、下载瞬间完成的情况下也不会堆内存。
+    static func saveFromPath(_ path: String, in dir: String, createMillis: Int64? = nil) {
+        if !FileManager.default.fileExists(atPath: path) {
+            print("saveFromPath: file not found => \(path)")
+            return
+        }
+        let fileUrl = URL(fileURLWithPath: path)
+        if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
+            PHPhotoLibrary.requestAuthorization({ (status) -> Void in
+                if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
+                    return
+                }
+                createAlbum(albumName: dir, completion: { assetCollection in
+                    self.addAsset(fileUrl: fileUrl, assetCollection: assetCollection, createMillis: createMillis, deleteSourceWhenDone: true)
+                })
+            })
+        } else {
+            createAlbum(albumName: dir, completion: { assetCollection in
+                self.addAsset(fileUrl: fileUrl, assetCollection: assetCollection, createMillis: createMillis, deleteSourceWhenDone: true)
+            })
+        }
+    }
+    
+    static func addAsset(fileUrl: URL, assetCollection: PHAssetCollection, createMillis: Int64?, deleteSourceWhenDone: Bool = false) {
         PHPhotoLibrary.shared().performChanges({
             guard let assetChangeRequest = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileUrl) else {
                 return
@@ -127,10 +165,9 @@ struct DocumentPlugin {
             let enumeration: NSArray = assetPlaceHolder == nil ? [] : [assetPlaceHolder!]
             albumChangeRequest?.addAssets(enumeration)
         }, completionHandler: { (success, error) -> Void in
-            print("success \(success)")
-            do {
-                try FileManager.default.removeItem(at: fileUrl)
-            } catch {
+            print("addAsset success \(success)")
+            if deleteSourceWhenDone {
+                try? FileManager.default.removeItem(at: fileUrl)
             }
         })
     }

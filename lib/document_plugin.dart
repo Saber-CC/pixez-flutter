@@ -34,12 +34,13 @@ class DocumentPlugin {
   }
 
   static Future<bool?> saveFromPath(String sourcePath, String fileName,
-      {bool clearOld = false, int? saveMode}) async {
+      {bool clearOld = false, int? saveMode, int? createMillis}) async {
     return platform.invokeMethod<bool>('saveFromPath', {
       "source_path": sourcePath,
       "name": fileName,
       "save_mode": saveMode ?? userSetting.saveMode,
-      "clear_old": clearOld
+      "clear_old": clearOld,
+      if (createMillis != null) "create_millis": createMillis,
     });
   }
 
