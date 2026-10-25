@@ -24,6 +24,8 @@
   "clear": "전부 지우기",
   "clear_all_cache": "모든 캐시 삭제",
   "clear_completed_tasks": "완료된 작업을 삭제",
+  "clear_all_tasks": "모든 작업 삭제",
+  "clear_all_tasks_message": "모든 다운로드 작업을 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
   "clearn_cache": "캐시 삭제",
   "clearn_cache_hint": "GIF 파일에 문제가 있을 경우 삭제",
   "complete": "완료",

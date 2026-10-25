@@ -282,6 +282,13 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
                           });
                           Navigator.of(context).pop();
                         },
+                      ),
+                      ListTile(
+                        title: Text(I18n.of(context).clear_all_tasks),
+                        onTap: () async {
+                          Navigator.of(context).pop();
+                          await _clearAllJobs();
+                        },
                       )
                     ],
                     mainAxisSize: MainAxisSize.min,
@@ -520,6 +527,33 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
         ),
       ),
     );
+  }
+
+  /// 清空所有任务：连还没下载完的队列一起丢掉，不用等它们跑完。
+  Future<void> _clearAllJobs() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        content: Text(I18n.of(context).clear_all_tasks_message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(I18n.of(context).cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(I18n.of(context).ok),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    fetcher.clearAll();
+    await taskPersistProvider.deleteAll();
+    if (!mounted) return;
+    setState(() {
+      _list = [];
+    });
   }
 
   Future _deleteJob(TaskPersist persist) async {

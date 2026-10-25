@@ -267,6 +267,35 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
                 });
                 initMethod();
               },
+            ),
+            CommandBarButton(
+              label: Text(I18n.of(context).clear_all_tasks),
+              onPressed: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (dialogContext) => ContentDialog(
+                    title: Text(I18n.of(context).clear_all_tasks),
+                    content: Text(I18n.of(context).clear_all_tasks_message),
+                    actions: [
+                      Button(
+                        child: Text(I18n.of(context).cancel),
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                      ),
+                      FilledButton(
+                        child: Text(I18n.of(context).ok),
+                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed != true) return;
+                fetcher.clearAll();
+                await taskPersistProvider.deleteAll();
+                if (!mounted) return;
+                setState(() {
+                  _list = [];
+                });
+              },
             )
           ],
         ),

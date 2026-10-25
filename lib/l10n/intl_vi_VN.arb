@@ -24,6 +24,8 @@
   "clear": "Dọn dẹp",
   "clear_all_cache": "Dọn tất cả bộ nhớ đệm",
   "clear_completed_tasks": "Dọn tắt cả các tác vụ thành công",
+  "clear_all_tasks": "Xóa tất cả tác vụ",
+  "clear_all_tasks_message": "Xóa tất cả tác vụ tải xuống? Không thể hoàn tác thao tác này.",
   "clearn_cache": "Dọn bộ nhớ đệm",
   "clearn_cache_hint": "Thử nếu bạn gặp vấn đề với GIFs",
   "complete": "Thành công",

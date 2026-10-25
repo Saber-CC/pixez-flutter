@@ -40,7 +40,7 @@ import 'package:pixez/utils/haptic_util.dart';
 import 'package:quiver/collection.dart';
 import 'package:rhttp/rhttp.dart' as r;
 
-enum IsoTaskState { INIT, APPEND, PROGRESS, ERROR, COMPLETE, RELOAD }
+enum IsoTaskState { INIT, APPEND, PROGRESS, ERROR, COMPLETE, RELOAD, CANCEL_ALL }
 
 class IsoContactBean {
   final IsoTaskState state;
@@ -208,6 +208,17 @@ class Fetcher {
     isolate?.kill(priority: Isolate.immediate);
   }
 
+  /// 清空所有任务：丢掉内存里排队/正在下载的任务，并通知下载 isolate
+  /// 放弃当前正在传输的文件。数据库里的任务记录由调用方负责删除。
+  void clearAll() {
+    queue.clear();
+    urlPool.clear();
+    jobMaps.clear();
+    sendPortToChild?.send(
+      IsoContactBean(state: IsoTaskState.CANCEL_ALL, data: null),
+    );
+  }
+
   void reloadNetwork() {
     sendPortToChild?.send(
       IsoContactBean(
@@ -286,6 +297,8 @@ entryPoint(SendMessage message) async {
   var currentNetworkMode = message.networkMode;
   RootIsolateToken rootIsolateToken = message.rootIsolateToken;
   SendPort sendPort = message.sendPort;
+  // 由主 isolate 的「清空所有任务」置位，正在下载的循环看到后立刻放弃。
+  var cancelCurrent = false;
   LPrinter.d("entryPoint ====== $pictureSource");
   BackgroundIsolateBinaryMessenger.ensureInitialized(rootIsolateToken);
   await r.Rhttp.init();
@@ -327,12 +340,17 @@ entryPoint(SendMessage message) async {
         dio.httpClientAdapter = ConversionLayerAdapter(newClient);
         return;
       }
+      if (isoContactBean.state == IsoTaskState.CANCEL_ALL) {
+        cancelCurrent = true;
+        return;
+      }
       TaskBean taskBean = isoContactBean.data;
       switch (isoContactBean.state) {
         case IsoTaskState.ERROR:
           break;
         case IsoTaskState.APPEND:
           try {
+            cancelCurrent = false;
             currentPictureSource = taskBean.source ?? pictureSource;
             currentNetworkMode = taskBean.networkMode ?? message.networkMode;
             print("========taskBean.savePath: ${taskBean.savePath}");
@@ -348,6 +366,7 @@ entryPoint(SendMessage message) async {
               },
               withProgress: true,
             )) {
+              if (cancelCurrent) break;
               if (response is DownloadProgress) {
                 sendPort.send(
                   IsoContactBean(
