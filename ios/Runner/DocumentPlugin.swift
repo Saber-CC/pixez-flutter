@@ -36,12 +36,12 @@ struct DocumentPlugin {
                         result(success)
                     }
                 }
-                result(true)
                 return
             } else if call.method == "permissionStatus" {
                 if #available(iOS 14, *) {
                     let readWriteStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-                    result(readWriteStatus == .authorized)
+                    // .limited（"仅选中的照片"）同样允许添加新资源，不能当成没授权。
+                    result(readWriteStatus == .authorized || readWriteStatus == .limited)
                 } else {
                     result(true)
                 }
@@ -62,10 +62,16 @@ struct DocumentPlugin {
     
     static var picCacheDir: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Pic", isDirectory: true)
     
+    /// 完全访问和"仅选中的照片"都能往相册添加新资源，两者都不能拒。
+    static func canAddToLibrary() -> Bool {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        return status == .authorized || status == .limited
+    }
+    
     static func save(_ data: Data, name: String, in dir: String, createMillis: Int64? = nil) {
-        if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
+        if !canAddToLibrary() {
             PHPhotoLibrary.requestAuthorization({ (status) -> Void in
-                if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
+                if !canAddToLibrary() {
                     return
                 }
                 createAlbum(albumName: dir, completion: { assetCollection in
@@ -146,9 +152,9 @@ struct DocumentPlugin {
                 completion(success)
             }
         }
-        if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
+        if !canAddToLibrary() {
             PHPhotoLibrary.requestAuthorization({ (status) -> Void in
-                if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
+                if !canAddToLibrary() {
                     completion(false)
                     return
                 }

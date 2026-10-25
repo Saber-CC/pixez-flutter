@@ -138,13 +138,16 @@ class Fetcher {
               LPrinter.d("c ${queue.length}");
             }
             fetcher.jobMaps.removeWhere((key, value) => key == taskBean.url);
-            nextJob();
+            // 先把它排进保存队列（会占掉一个 pending 额度）再放行下一个下载，
+            // 否则下一张会在计数更新前被派发，实际同时在途的临时文件会超过上限。
             _complete(
               taskBean.url!,
               taskBean.savePath!,
               taskBean.fileName!,
               taskBean.illusts!,
-            );
+            ).catchError((e) {
+              LPrinter.d(e);
+            }).whenComplete(nextJob);
             break;
           case IsoTaskState.ERROR:
             TaskBean taskBean = isoContactBean.data;
@@ -247,6 +250,14 @@ class Fetcher {
     );
   }
 
+  void _deleteTempFile(File file) {
+    try {
+      if (file.existsSync()) file.deleteSync();
+    } catch (e) {
+      LPrinter.d(e);
+    }
+  }
+
   Future<void> _complete(
     String url,
     String savePath,
@@ -264,7 +275,8 @@ class Fetcher {
         .then((_) async {
           try {
             if (generation != _saveGeneration) {
-              // 任务已被「清空所有任务」丢弃，直接跳过。
+              // 任务已被「清空所有任务」丢弃，删掉临时文件直接跳过。
+              _deleteTempFile(file);
               return;
             }
             var saved = false;
@@ -276,6 +288,11 @@ class Fetcher {
                   .timeout(const Duration(minutes: 1));
             } catch (e) {
               LPrinter.d(e);
+            }
+            if (generation != _saveGeneration) {
+              // 保存期间任务被清空了：不写状态、不弹提示。
+              _deleteTempFile(file);
+              return;
             }
             await taskPersistProvider.update(taskPersist..status = saved ? 2 : 3);
             final job = jobMaps[url];

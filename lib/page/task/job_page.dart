@@ -575,7 +575,8 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   }
 
   Future _retryJob(TaskPersist persist, {bool notify = true}) async {
-    if (persist.status == 2) return;
+    // 2 = 已完成，1 = 正在写相册；这两种状态下重试都会把同一张图再导一次。
+    if (persist.status == 2 || persist.status == 1) return;
     await _deleteJob(persist, notify: notify);
     final taskPersist = persist;
     await taskPersistProvider.insert(taskPersist);

@@ -105,9 +105,10 @@ Future<String> buildSaveFileName(
 
 /// 从 pixiv 原图 URL 中取出页码。
 ///
-/// 例如 `.../125547965_p2.jpg` 返回 2，取不到时返回 0。
+/// 例如 `.../125547965_p2.jpg`、`..._p2_master1200.jpg` 都返回 2，
+/// 取不到时返回 0。
 int pageIndexFromUrl(String url) {
-  final match = RegExp(r'_p(\d+)\.').firstMatch(url);
+  final match = RegExp(r'_p(\d+)').firstMatch(url);
   if (match == null) return 0;
   return int.tryParse(match.group(1)!) ?? 0;
 }
@@ -462,6 +463,7 @@ abstract class _SaveStoreBase with Store {
             illusts.user.id,
             illusts.sanityLevel,
           ),
+          clearOld: userSetting.isClearOldFormatFile,
           createMillis: createMillis,
         );
         return saved ?? false;
