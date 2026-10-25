@@ -338,7 +338,13 @@ class Fetcher {
     _retryAttempts.remove(url);
     _retryEpoch.remove(url);
     // 先标成"保存中"，这样在相册真正写进去之前不会被当成 seed 再重试一遍。
-    await taskPersistProvider.update(taskPersist..status = 1);
+    try {
+      await taskPersistProvider.update(taskPersist..status = 1);
+    } catch (e) {
+      _savingUrls.remove(url);
+      if (generation == _saveGeneration && _pendingSaves > 0) _pendingSaves--;
+      rethrow;
+    }
     _saveChain = _saveChain
         .then((_) async {
           try {
