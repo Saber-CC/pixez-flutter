@@ -185,7 +185,11 @@ class Fetcher {
     );
   }
 
-  save(String url, Illusts illusts, String fileName) async {
+  /// 把任务加进下载队列。
+  ///
+  /// [front] 为 true 时插到队首：失败重试和用户手动重试应该尽快重新开始，
+  /// 而不是排到一千个任务后面去。批量重排（重试所有 seed）仍用队尾，保证顺序。
+  save(String url, Illusts illusts, String fileName, {bool front = false}) async {
     LPrinter.d(sendPortToChild.toString() + url);
     var taskBean = TaskBean(
       url: url,
@@ -196,7 +200,11 @@ class Fetcher {
       host: splashStore.host,
       savePath: (await getTemporaryDirectory()).path,
     );
-    queue.add(taskBean);
+    if (front) {
+      queue.insert(0, taskBean);
+    } else {
+      queue.add(taskBean);
+    }
     nextJob();
   }
 
@@ -439,7 +447,7 @@ class Fetcher {
         _retryAttempts.remove(url);
         return;
       }
-      await save(url, again.toIllusts(), again.fileName);
+      await save(url, again.toIllusts(), again.fileName, front: true);
       _retryEpoch.remove(url);
     } catch (e) {
       LPrinter.d(e);

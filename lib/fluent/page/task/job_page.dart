@@ -651,7 +651,9 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
     await taskPersistProvider.insert(latest..status = 0);
     if (epoch != null && epoch != _jobEpoch) return;
     fetcher.resetRetry(latest.url);
-    await fetcher.save(latest.url, latest.toIllusts(), latest.fileName);
+    // 单条手动重试插到队首尽快开始；批量重排（notify == false）保持原顺序。
+    await fetcher.save(latest.url, latest.toIllusts(), latest.fileName,
+        front: notify);
     if (notify) await _refresh();
   }
 }
