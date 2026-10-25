@@ -214,6 +214,17 @@ create table $tableAccount (
     return result;
   }
 
+  /// 任务开始下载时把行标记成"进行中"（只动还是 seed 的行），
+  /// 这样任务统计和重试守卫看到的都是真实状态，而不是一直显示"等待下载"。
+  Future<int> markRunning(String url) async {
+    return db.update(
+      tableAccount,
+      {columnStatus: 1},
+      where: '$columnUrl = ? AND $columnStatus = ?',
+      whereArgs: [url, 0],
+    );
+  }
+
   /// App 启动时把上次异常退出遗留的"保存中"任务退回 seed，方便重试。
   Future<int> resetRunning() async {
     final result = await db.update(

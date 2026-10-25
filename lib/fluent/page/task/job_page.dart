@@ -68,7 +68,6 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   initMethod() async {
     await taskPersistProvider.open();
     _refresh();
-    _loadCounts();
     _timer = Timer.periodic(Duration(seconds: 1), (time) {
       _fetchLocal();
     });
@@ -107,6 +106,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
         ...saving.where((e) => !urls.contains(e.url)),
       ];
     });
+    _loadCounts();
   }
 
   _refresh() async {
@@ -137,6 +137,8 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   bool _endOfPage = false;
 
   _next() async {
+    // 「进行中」是实时列表，分页会把旧的 16 条又叠一遍。
+    if (currentIndex == 1) return;
     if (_nextLoading || _endOfPage) return;
     _nextLoading = true;
     _page++;
@@ -290,6 +292,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
                   ),
                 );
                 if (confirmed != true) return;
+                _jobEpoch++;
                 fetcher.clearAll();
                 await taskPersistProvider.deleteAll();
                 if (!mounted) return;
@@ -323,6 +326,9 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
 
   int currentIndex = 0;
   int _page = 0;
+
+  /// 批量重试/删除的批次号，清空任务时自增以中断正在跑的循环。
+  int _jobEpoch = 0;
 
   Future<void> _loadCounts() async {
     try {
@@ -569,9 +575,12 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
 
   /// 按任务原始顺序（id 升序）一条一条重新入队，避免并发入队打乱顺序。
   Future<void> _retryJobs(int status) async {
+    final epoch = _jobEpoch;
     final results = await taskPersistProvider.getAllAccount();
     results.sort((a, b) => (a.id ?? 0).compareTo(b.id ?? 0));
     for (final element in results) {
+      // 循环期间如果用户清空了所有任务，就不要再把行写回去。
+      if (epoch != _jobEpoch) return;
       if (element.status == status) {
         await _retryJob(element, notify: false);
       }
@@ -580,8 +589,10 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   }
 
   Future<void> _deleteJobs(int status) async {
+    final epoch = _jobEpoch;
     final results = await taskPersistProvider.getAllAccount();
     for (final element in results) {
+      if (epoch != _jobEpoch) return;
       if (element.status == status) {
         await _deleteJob(element, notify: false);
       }
@@ -603,8 +614,10 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
     fetcher.resetRetry(target.url);
     if (notify && mounted) {
       setState(() {
-        _list.removeWhere((element) => element.id == target.id);
+        _list.removeWhere((element) =>
+            element.id == target.id || element.url == target.url);
       });
+      _loadCounts();
     }
   }
 

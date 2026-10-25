@@ -233,7 +233,14 @@ class Fetcher {
         data: first,
       );
       sendPortToChild?.send(isoContactBean);
-      if (first.url != null) urlPool.add(first.url!);
+      if (first.url != null) {
+        urlPool.add(first.url!);
+        // 派发时就标成"进行中"：统计里能看到它在下载，
+        // 重试入口也不会在这段时间把它当成 seed 再排一遍。
+        taskPersistProvider.markRunning(first.url!).catchError((e) {
+          LPrinter.d(e);
+        });
+      }
     }
   }
 
@@ -305,6 +312,12 @@ class Fetcher {
               _deleteTempFile(file);
               return;
             }
+            final current = await taskPersistProvider.getAccount(url);
+            if (current == null) {
+              // 排队等保存期间任务被单独删掉了，别再写进相册。
+              _deleteTempFile(file);
+              return;
+            }
             var saved = false;
             try {
               // 直接把临时文件路径交给原生层，避免把整张图读进内存再过一遍平台通道。
@@ -336,7 +349,10 @@ class Fetcher {
               HapticUtil.error();
             }
           } finally {
-            if (_pendingSaves > 0) _pendingSaves--;
+            // 只减自己这一代的数量，避免清空任务后旧链条把新一批的额度一起减掉。
+            if (generation == _saveGeneration && _pendingSaves > 0) {
+              _pendingSaves--;
+            }
             nextJob();
           }
         })
