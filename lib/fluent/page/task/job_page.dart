@@ -500,7 +500,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
                           if (_itemSimple) ...[
                             PixEzButton(
                                 onPressed: () {
-                                  _retryJob(taskPersist);
+                                  _retryJob(taskPersist, epoch: _jobEpoch);
                                 },
                                 child: Icon(FluentIcons.refresh)),
                             Padding(
@@ -541,7 +541,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
                                   children: [
                                     PixEzButton(
                                         onPressed: () {
-                                          _retryJob(taskPersist);
+                                          _retryJob(taskPersist, epoch: _jobEpoch);
                                         },
                                         child: Icon(FluentIcons.refresh)),
                                     Padding(
@@ -616,6 +616,10 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
       final found = await taskPersistProvider.getAccount(target.url);
       if (found == null) return;
       target = found;
+    }
+    if (fetcher.isSaving(target.url)) {
+      // 正在写相册：原生导入取消不了，删掉再保存会把同一张图导两次。
+      return;
     }
     final removed = await taskPersistProvider.remove(target.id!);
     if (removed == 0) {

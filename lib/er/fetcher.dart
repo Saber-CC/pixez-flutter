@@ -140,6 +140,8 @@ class Fetcher {
               LPrinter.d("c ${queue.length}");
             }
             fetcher.jobMaps.removeWhere((key, value) => key == taskBean.url);
+            // 同一个下载重复上报（例如缓存过期时先给旧文件再给新文件），忽略后面的。
+            if (_savingUrls.contains(taskBean.url!)) break;
             // 这个 URL 从现在起归"保存"管：在导入结束前不允许再被重排/重新保存，
             // 否则旧保存会把同一张图再导一次。
             _savingUrls.add(taskBean.url!);
@@ -201,6 +203,8 @@ class Fetcher {
       savePath: (await getTemporaryDirectory()).path,
     );
     if (front) {
+      // 同一个 URL 只留一条：连点重试时不要把同一个任务插两次。
+      queue.removeWhere((e) => e.url == url);
       queue.insert(0, taskBean);
     } else {
       queue.add(taskBean);
@@ -318,20 +322,23 @@ class Fetcher {
     String fileName,
     Illusts illusts,
   ) async {
+    // 先占额度再 await：clearAll 会把 _pendingSaves 一起归零，
+    // 这样不会出现"计数加在归零之后、减的时候又因代次不同被跳过"的泄漏。
+    final generation = _saveGeneration;
+    _pendingSaves++;
+    final file = File(savePath + Platform.pathSeparator + fileName);
     var taskPersist = await taskPersistProvider.getAccount(url);
     if (taskPersist == null) {
       // 任务已被删除（清空所有任务）：把下载好的临时文件一并清掉。
       _savingUrls.remove(url);
-      _deleteTempFile(File(savePath + Platform.pathSeparator + fileName));
+      _deleteTempFile(file);
+      if (generation == _saveGeneration && _pendingSaves > 0) _pendingSaves--;
       return;
     }
     _retryAttempts.remove(url);
     _retryEpoch.remove(url);
-    final file = File(savePath + Platform.pathSeparator + fileName);
-    final generation = _saveGeneration;
     // 先标成"保存中"，这样在相册真正写进去之前不会被当成 seed 再重试一遍。
     await taskPersistProvider.update(taskPersist..status = 1);
-    _pendingSaves++;
     _saveChain = _saveChain
         .then((_) async {
           try {
@@ -565,6 +572,7 @@ entryPoint(SendMessage message) async {
                 taskBean.savePath! +
                 Platform.pathSeparator +
                 taskBean.fileName!;
+            var fileReady = false;
             await for (final response in pixivCacheManager!.getFileStream(
               taskBean.url!,
               headers: {
@@ -586,6 +594,10 @@ entryPoint(SendMessage message) async {
                   ),
                 );
               } else if (response is FileInfo) {
+                // 缓存过期时 getFileStream 会先吐一次旧缓存、下载完再吐一次新文件。
+                // 每次下载只处理第一个，否则同一个 URL 会发两次 COMPLETE、导两次相册。
+                if (fileReady) continue;
+                fileReady = true;
                 File file = File(savePath);
                 if (!file.parent.existsSync()) {
                   file.parent.createSync(recursive: true);
