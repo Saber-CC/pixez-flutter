@@ -235,37 +235,19 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
             CommandBarButton(
               label: Text(I18n.of(context).retry_failed_tasks),
               onPressed: () async {
-                final results = await taskPersistProvider.getAllAccount();
-                results.forEach((element) {
-                  if (element.status == 3) {
-                    _retryJob(element);
-                  }
-                });
-                initMethod();
+                await _retryJobs(3);
               },
             ),
             CommandBarButton(
               label: Text(I18n.of(context).retry_seed_task),
               onPressed: () async {
-                final results = await taskPersistProvider.getAllAccount();
-                results.forEach((element) {
-                  if (element.status == 0) {
-                    _retryJob(element);
-                  }
-                });
-                initMethod();
+                await _retryJobs(0);
               },
             ),
             CommandBarButton(
               label: Text(I18n.of(context).clear_completed_tasks),
               onPressed: () async {
-                final results = await taskPersistProvider.getAllAccount();
-                results.forEach((element) {
-                  if (element.status == 2) {
-                    _deleteJob(element);
-                  }
-                });
-                initMethod();
+                await _deleteJobs(2);
               },
             ),
             CommandBarButton(
@@ -544,21 +526,45 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
     );
   }
 
-  Future _deleteJob(TaskPersist persist) async {
+  /// 按任务原始顺序（id 升序）一条一条重新入队，避免并发入队打乱顺序。
+  Future<void> _retryJobs(int status) async {
+    final results = await taskPersistProvider.getAllAccount();
+    results.sort((a, b) => (a.id ?? 0).compareTo(b.id ?? 0));
+    for (final element in results) {
+      if (element.status == status) {
+        await _retryJob(element, notify: false);
+      }
+    }
+    if (mounted) await _refresh();
+  }
+
+  Future<void> _deleteJobs(int status) async {
+    final results = await taskPersistProvider.getAllAccount();
+    for (final element in results) {
+      if (element.status == status) {
+        await _deleteJob(element, notify: false);
+      }
+    }
+    if (mounted) await _refresh();
+  }
+
+  Future _deleteJob(TaskPersist persist, {bool notify = true}) async {
     await taskPersistProvider.remove(persist.id!);
     fetcher.jobMaps.remove(persist.url);
     fetcher.queue.removeWhere((element) => element.url == persist.url);
-    setState(() {
-      _list.removeWhere((element) => element.id == persist.id);
-    });
+    if (notify && mounted) {
+      setState(() {
+        _list.removeWhere((element) => element.id == persist.id);
+      });
+    }
   }
 
-  Future _retryJob(TaskPersist persist) async {
+  Future _retryJob(TaskPersist persist, {bool notify = true}) async {
     if (persist.status == 2) return;
-    await _deleteJob(persist);
+    await _deleteJob(persist, notify: notify);
     final taskPersist = persist;
     await taskPersistProvider.insert(taskPersist);
     await fetcher.save(persist.url, taskPersist.toIllusts(), persist.fileName);
-    _refresh();
+    if (notify) await _refresh();
   }
 }
