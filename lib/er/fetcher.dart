@@ -236,7 +236,8 @@ class Fetcher {
       if (sendPort == null) return;
       TaskBean? first = null;
       for (var i in queue) {
-        if (!urlPool.contains(i.url)) {
+        // 同一个 URL 还在写相册时先别重新下载：两次尝试会抢同一个临时文件。
+        if (!urlPool.contains(i.url) && !_savingUrls.contains(i.url)) {
           first = i;
           break;
         }
