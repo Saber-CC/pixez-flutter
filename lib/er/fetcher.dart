@@ -158,7 +158,9 @@ class Fetcher {
             }
             fetcher.jobMaps.removeWhere((key, value) => key == taskBean.url);
             nextJob();
-            _handleDownloadError(taskBean);
+            _handleDownloadError(taskBean).catchError((e) {
+              LPrinter.d(e);
+            });
             break;
           default:
             break;
@@ -203,6 +205,15 @@ class Fetcher {
   static const List<int> _retryDelays = [2, 6, 15];
   final Map<String, int> _retryAttempts = {};
 
+  /// 每个 URL 的重试代次，用来作废还在倒计时里的重试
+  /// （手动重试 / 清空任务 / 重新保存都会让它失效）。
+  final Map<String, int> _retryEpoch = {};
+  int _retryEpochSeq = 0;
+
+  /// 这张图是否已经在队列里或正在下载/保存。
+  bool isActive(String url) =>
+      urlPool.contains(url) || queue.any((e) => e.url == url);
+
   nextJob() {
     if (_pendingSaves >= _maxPendingSaves) return;
     if (queue.isNotEmpty && urlPool.length < userSetting.maxRunningTask) {
@@ -235,6 +246,10 @@ class Fetcher {
   void clearAll() {
     _saveGeneration++;
     _retryAttempts.clear();
+    _retryEpoch.clear();
+    // 旧的一批保存会让 _pendingSaves 慢慢回落，这里直接归零，
+    // 免得清空后新一批被上一批的保存额度卡住。
+    _pendingSaves = 0;
     queue.clear();
     urlPool.clear();
     jobMaps.clear();
@@ -270,8 +285,13 @@ class Fetcher {
     Illusts illusts,
   ) async {
     var taskPersist = await taskPersistProvider.getAccount(url);
-    if (taskPersist == null) return;
+    if (taskPersist == null) {
+      // 任务已被删除（清空所有任务）：把下载好的临时文件一并清掉。
+      _deleteTempFile(File(savePath + Platform.pathSeparator + fileName));
+      return;
+    }
     _retryAttempts.remove(url);
+    _retryEpoch.remove(url);
     final file = File(savePath + Platform.pathSeparator + fileName);
     final generation = _saveGeneration;
     // 先标成"保存中"，这样在相册真正写进去之前不会被当成 seed 再重试一遍。
@@ -316,7 +336,7 @@ class Fetcher {
               HapticUtil.error();
             }
           } finally {
-            _pendingSaves--;
+            if (_pendingSaves > 0) _pendingSaves--;
             nextJob();
           }
         })
@@ -331,8 +351,14 @@ class Fetcher {
   /// 429 限流这种情况重试基本都能过。
   Future<void> _handleDownloadError(TaskBean taskBean) async {
     final url = taskBean.url!;
-    final attempt = _retryAttempts[url] ?? 0;
-    if (attempt < _retryDelays.length) {
+    try {
+      final attempt = _retryAttempts[url] ?? 0;
+      if (attempt >= _retryDelays.length) {
+        _retryAttempts.remove(url);
+        _retryEpoch.remove(url);
+        await _errorD(url);
+        return;
+      }
       _retryAttempts[url] = attempt + 1;
       final seconds = _retryDelays[attempt];
       LPrinter.d(
@@ -344,22 +370,40 @@ class Fetcher {
       }
       // 先标成"进行中"，免得被「重试所有 seed 任务」再排一遍。
       await taskPersistProvider.update(persist..status = 1);
+      // 记住这次重试的代次：倒计时期间如果用户手动重试、重新保存或清空任务，
+      // 代次会变，这次重试就直接作废，避免重复入队。
+      final epoch = ++_retryEpochSeq;
+      _retryEpoch[url] = epoch;
       await Future.delayed(Duration(seconds: seconds));
+      if (_retryEpoch[url] != epoch) {
+        _retryAttempts.remove(url);
+        return;
+      }
+      _retryEpoch.remove(url);
       final again = await taskPersistProvider.getAccount(url);
-      if (again == null || again.status == 2) {
+      if (again == null || again.status == 2 || isActive(url)) {
         _retryAttempts.remove(url);
         return;
       }
       await taskPersistProvider.update(again..status = 0);
       await save(url, again.toIllusts(), again.fileName);
-      return;
+    } catch (e) {
+      LPrinter.d(e);
+      _retryAttempts.remove(url);
+      _retryEpoch.remove(url);
+      try {
+        await _errorD(url);
+      } catch (e) {
+        LPrinter.d(e);
+      }
     }
-    _retryAttempts.remove(url);
-    await _errorD(url);
   }
 
-  /// 用户手动重试时清掉自动重试计数。
-  void resetRetry(String url) => _retryAttempts.remove(url);
+  /// 用户手动重试 / 重新保存时清掉自动重试计数，并作废还在倒计时的重试。
+  void resetRetry(String url) {
+    _retryAttempts.remove(url);
+    _retryEpoch.remove(url);
+  }
 
   Future<void> _errorD(String url) async {
     var taskPersist = await taskPersistProvider.getAccount(url);

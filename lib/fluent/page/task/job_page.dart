@@ -92,7 +92,8 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
         .toList();
     var saving = <TaskPersist>[];
     try {
-      saving = await taskPersistProvider.getDownloadTask(0, 1, false);
+      saving = await taskPersistProvider.getDownloadTask(0, 1, false,
+          limit: 100);
     } catch (e) {
       print(e);
     }
@@ -553,24 +554,35 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   }
 
   Future _deleteJob(TaskPersist persist, {bool notify = true}) async {
-    await taskPersistProvider.remove(persist.id!);
-    fetcher.jobMaps.remove(persist.url);
-    fetcher.queue.removeWhere((element) => element.url == persist.url);
+    // 「进行中」里的行是内存里拼出来的，没有 id，按 url 回数据库找一次。
+    var target = persist;
+    if (target.id == null) {
+      final found = await taskPersistProvider.getAccount(target.url);
+      if (found == null) return;
+      target = found;
+    }
+    await taskPersistProvider.remove(target.id!);
+    fetcher.jobMaps.remove(target.url);
+    fetcher.queue.removeWhere((element) => element.url == target.url);
+    fetcher.resetRetry(target.url);
     if (notify && mounted) {
       setState(() {
-        _list.removeWhere((element) => element.id == persist.id);
+        _list.removeWhere((element) => element.id == target.id);
       });
     }
   }
 
   Future _retryJob(TaskPersist persist, {bool notify = true}) async {
-    // 2 = 已完成，1 = 正在写相册；这两种状态下重试都会把同一张图再导一次。
-    if (persist.status == 2 || persist.status == 1) return;
-    await _deleteJob(persist, notify: notify);
-    final taskPersist = persist;
-    await taskPersistProvider.insert(taskPersist);
-    fetcher.resetRetry(persist.url);
-    await fetcher.save(persist.url, taskPersist.toIllusts(), persist.fileName);
+    // 以数据库里的最新状态为准：列表里的对象可能是旧的（例如刚重试过的那条）。
+    final latest = await taskPersistProvider.getAccount(persist.url);
+    if (latest == null) return;
+    // 2 = 已完成，1 = 正在下载 / 写相册 / 等自动重试；重试会重复导入同一张图。
+    if (latest.status == 2 || latest.status == 1) return;
+    if (fetcher.isActive(latest.url)) return;
+    await _deleteJob(latest, notify: notify);
+    await taskPersistProvider.insert(latest..status = 0);
+    fetcher.resetRetry(latest.url);
+    await fetcher.save(latest.url, latest.toIllusts(), latest.fileName);
     if (notify) await _refresh();
   }
 }

@@ -233,8 +233,7 @@ create table $tableAccount (
   }
 
   Future<List<TaskPersist>> getDownloadTask(
-      int page, int status, bool asc) async {
-    final LIMIT = 16;
+      int page, int status, bool asc, {int limit = 16}) async {
     List<Map<String, dynamic>> maps = await db.query(
       tableAccount,
       columns: [
@@ -250,8 +249,8 @@ create table $tableAccount (
         columnMedium
       ],
       orderBy: "${columnId} ${asc ? "ASC" : "DESC"}",
-      limit: LIMIT,
-      offset: page * LIMIT,
+      limit: limit,
+      offset: page * limit,
       where: status == 10 ? null : '$columnStatus = ?',
       whereArgs: status == 10 ? null : [status],
     );

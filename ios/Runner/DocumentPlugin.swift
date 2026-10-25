@@ -75,13 +75,11 @@ struct DocumentPlugin {
                     return
                 }
                 createAlbum(albumName: dir, completion: { assetCollection in
-                    guard let assetCollection = assetCollection else { return }
                     self.save(data: data, name: name, assetCollection: assetCollection, createMillis: createMillis)
                 })
             })
         } else {
             createAlbum(albumName: dir, completion: { assetCollection in
-                guard let assetCollection = assetCollection else { return }
                 self.save(data: data, name: name, assetCollection: assetCollection, createMillis: createMillis)
             })
         }
@@ -107,7 +105,7 @@ struct DocumentPlugin {
         return collection.firstObject
     }
     
-    static func save(data:Data,name:String, assetCollection: PHAssetCollection, createMillis: Int64? = nil){
+    static func save(data:Data,name:String, assetCollection: PHAssetCollection?, createMillis: Int64? = nil){
         if !FileManager.default.fileExists(atPath: picCacheDir.path) {
             do{
                 try FileManager.default.createDirectory(at: picCacheDir, withIntermediateDirectories: true)
@@ -144,10 +142,7 @@ struct DocumentPlugin {
         }
         let fileUrl = URL(fileURLWithPath: path)
         let handleAlbum: (PHAssetCollection?) -> Void = { assetCollection in
-            guard let assetCollection = assetCollection else {
-                completion(false)
-                return
-            }
+            // 相册分组建不出来（例如"仅选中的照片"权限）时仍然存进照片库，只是不进 pxez 分组。
             self.addAsset(fileUrl: fileUrl, assetCollection: assetCollection, createMillis: createMillis, deleteSourceWhenDone: true) { success in
                 completion(success)
             }
@@ -165,7 +160,7 @@ struct DocumentPlugin {
         }
     }
     
-    static func addAsset(fileUrl: URL, assetCollection: PHAssetCollection, createMillis: Int64?, deleteSourceWhenDone: Bool = false, completion: ((Bool) -> Void)? = nil) {
+    static func addAsset(fileUrl: URL, assetCollection: PHAssetCollection?, createMillis: Int64?, deleteSourceWhenDone: Bool = false, completion: ((Bool) -> Void)? = nil) {
         var created = false
         PHPhotoLibrary.shared().performChanges({
             guard let assetChangeRequest = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileUrl) else {
@@ -178,16 +173,19 @@ struct DocumentPlugin {
             if let createMillis = createMillis {
                 assetChangeRequest.creationDate = Date(timeIntervalSince1970: TimeInterval(createMillis) / 1000.0)
             }
-            let assetPlaceHolder = assetChangeRequest.placeholderForCreatedAsset
-            let albumChangeRequest = PHAssetCollectionChangeRequest(for: assetCollection)
-            let enumeration: NSArray = assetPlaceHolder == nil ? [] : [assetPlaceHolder!]
-            albumChangeRequest?.addAssets(enumeration)
+            if let assetCollection = assetCollection,
+               let assetPlaceHolder = assetChangeRequest.placeholderForCreatedAsset,
+               let albumChangeRequest = PHAssetCollectionChangeRequest(for: assetCollection) {
+                albumChangeRequest.addAssets([assetPlaceHolder] as NSArray)
+            }
         }, completionHandler: { (success, error) -> Void in
-            print("addAsset success \(success)")
-            if deleteSourceWhenDone {
+            let ok = success && created
+            print("addAsset success \(ok)")
+            // 导入失败时保留源文件，方便重试；成功才清理，避免在 PhotoKit 还在读的时候删掉它。
+            if deleteSourceWhenDone && ok {
                 try? FileManager.default.removeItem(at: fileUrl)
             }
-            completion?(success && created)
+            completion?(ok)
         })
     }
 }
