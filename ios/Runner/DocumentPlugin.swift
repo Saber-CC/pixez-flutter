@@ -49,7 +49,10 @@ struct DocumentPlugin {
             } else if call.method == "requestPermission" {
                 if #available(iOS 14, *) {
                     PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
-                        result(status == .authorized)
+                        // 回调不在主线程，回复必须切回主线程；.limited 也能添加资源。
+                        DispatchQueue.main.async {
+                            result(status == .authorized || status == .limited)
+                        }
                     }
                 } else {
                     result(true)

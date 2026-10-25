@@ -250,14 +250,16 @@ abstract class _SaveStoreBase with Store {
                           QueueRetryEntity entity =
                               stream.entity as QueueRetryEntity;
                           final id = entity.taskPersist.id;
-                          if (id != null) {
-                            await fetcher.taskPersistProvider.remove(id);
-                            _joinQueue(
-                              entity.url,
-                              entity.illusts,
-                              entity.fileName,
-                            );
-                          }
+                          if (id == null) return;
+                          // 还在下载/写相册的任务不能删了重排：旧的那次保存
+                          // 会把同一张图再导一次，相册里就出现两张。
+                          if (fetcher.isActive(entity.url)) return;
+                          await fetcher.taskPersistProvider.remove(id);
+                          _joinQueue(
+                            entity.url,
+                            entity.illusts,
+                            entity.fileName,
+                          );
                         }
                       },
                       icon: Icon(Icons.refresh),
@@ -340,6 +342,8 @@ abstract class _SaveStoreBase with Store {
     );
     try {
       await fetcher.taskPersistProvider.insert(taskPersist);
+      // 重新保存时清掉上一次的进度残留，否则这一行可能被判成"已完成"而看不到。
+      fetcher.jobMaps.remove(url);
       // 用户重新保存时给这张图一份新的自动重试额度。
       fetcher.resetRetry(url);
       fetcher.save(url, illusts, fileName);

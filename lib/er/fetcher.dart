@@ -114,6 +114,8 @@ class Fetcher {
         switch (isoContactBean.state) {
           case IsoTaskState.INIT:
             sendPortToChild = isoContactBean.data;
+            // 等 isolate 就绪后再派发一次，避免启动瞬间 save()/重试把任务卡在队列里。
+            nextJob();
             break;
           case IsoTaskState.PROGRESS:
             IsoProgressBean isoProgressBean = isoContactBean.data;
@@ -138,6 +140,9 @@ class Fetcher {
               LPrinter.d("c ${queue.length}");
             }
             fetcher.jobMaps.removeWhere((key, value) => key == taskBean.url);
+            // 这个 URL 从现在起归"保存"管：在导入结束前不允许再被重排/重新保存，
+            // 否则旧保存会把同一张图再导一次。
+            _savingUrls.add(taskBean.url!);
             // 先把它排进保存队列（会占掉一个 pending 额度）再放行下一个下载，
             // 否则下一张会在计数更新前被派发，实际同时在途的临时文件会超过上限。
             _complete(
@@ -146,6 +151,7 @@ class Fetcher {
               taskBean.fileName!,
               taskBean.illusts!,
             ).catchError((e) {
+              _savingUrls.remove(taskBean.url!);
               LPrinter.d(e);
             }).whenComplete(nextJob);
             break;
@@ -205,18 +211,29 @@ class Fetcher {
   static const List<int> _retryDelays = [2, 6, 15];
   final Map<String, int> _retryAttempts = {};
 
+  /// 已下载完、正在排队或执行写入相册的 URL。
+  final Set<String> _savingUrls = {};
+
   /// 每个 URL 的重试代次，用来作废还在倒计时里的重试
   /// （手动重试 / 清空任务 / 重新保存都会让它失效）。
   final Map<String, int> _retryEpoch = {};
   int _retryEpochSeq = 0;
 
-  /// 这张图是否已经在队列里或正在下载/保存。
+  /// 这张图是否已经在队列里、正在下载，或正在写相册。
   bool isActive(String url) =>
-      urlPool.contains(url) || queue.any((e) => e.url == url);
+      urlPool.contains(url) ||
+      _savingUrls.contains(url) ||
+      queue.any((e) => e.url == url);
+
+  /// 已经下载完、正在排队/执行写入相册的 URL。
+  bool isSaving(String url) => _savingUrls.contains(url);
 
   nextJob() {
     if (_pendingSaves >= _maxPendingSaves) return;
     if (queue.isNotEmpty && urlPool.length < userSetting.maxRunningTask) {
+      // isolate 还没就绪时不要占用 urlPool/改状态，等 INIT 再派发。
+      final sendPort = sendPortToChild;
+      if (sendPort == null) return;
       TaskBean? first = null;
       for (var i in queue) {
         if (!urlPool.contains(i.url)) {
@@ -232,12 +249,12 @@ class Fetcher {
         state: IsoTaskState.APPEND,
         data: first,
       );
-      sendPortToChild?.send(isoContactBean);
+      sendPort.send(isoContactBean);
       if (first.url != null) {
         urlPool.add(first.url!);
         // 派发时就标成"进行中"：统计里能看到它在下载，
         // 重试入口也不会在这段时间把它当成 seed 再排一遍。
-        taskPersistProvider.markRunning(first.url!).catchError((e) {
+        taskPersistProvider.markRunning(first.url!).then((_) {}, onError: (e) {
           LPrinter.d(e);
         });
       }
@@ -254,6 +271,7 @@ class Fetcher {
     _saveGeneration++;
     _retryAttempts.clear();
     _retryEpoch.clear();
+    _savingUrls.clear();
     // 旧的一批保存会让 _pendingSaves 慢慢回落，这里直接归零，
     // 免得清空后新一批被上一批的保存额度卡住。
     _pendingSaves = 0;
@@ -294,6 +312,7 @@ class Fetcher {
     var taskPersist = await taskPersistProvider.getAccount(url);
     if (taskPersist == null) {
       // 任务已被删除（清空所有任务）：把下载好的临时文件一并清掉。
+      _savingUrls.remove(url);
       _deleteTempFile(File(savePath + Platform.pathSeparator + fileName));
       return;
     }
@@ -313,8 +332,9 @@ class Fetcher {
               return;
             }
             final current = await taskPersistProvider.getAccount(url);
-            if (current == null) {
-              // 排队等保存期间任务被单独删掉了，别再写进相册。
+            if (current == null || current.id != taskPersist.id) {
+              // 排队等保存期间任务被删除，或者被重新保存成了新的一行：
+              // 这张旧文件不能再导进去，否则会和新的那次保存重复。
               _deleteTempFile(file);
               return;
             }
@@ -333,6 +353,12 @@ class Fetcher {
               _deleteTempFile(file);
               return;
             }
+            final after = await taskPersistProvider.getAccount(url);
+            if (after == null || after.id != taskPersist.id) {
+              // 导入期间这一行被删掉/换新了，不要覆盖新记录、也不要弹提示。
+              return;
+            }
+            if (!saved) _deleteTempFile(file);
             await taskPersistProvider.update(taskPersist..status = saved ? 2 : 3);
             final job = jobMaps[url];
             if (job != null) {
@@ -349,6 +375,7 @@ class Fetcher {
               HapticUtil.error();
             }
           } finally {
+            _savingUrls.remove(url);
             // 只减自己这一代的数量，避免清空任务后旧链条把新一批的额度一起减掉。
             if (generation == _saveGeneration && _pendingSaves > 0) {
               _pendingSaves--;
@@ -395,14 +422,24 @@ class Fetcher {
         _retryAttempts.remove(url);
         return;
       }
-      _retryEpoch.remove(url);
       final again = await taskPersistProvider.getAccount(url);
       if (again == null || again.status == 2 || isActive(url)) {
+        _retryAttempts.remove(url);
+        _retryEpoch.remove(url);
+        return;
+      }
+      // 倒计时结束后再确认一次：期间如果被「清空所有任务」或手动重试过，就放弃这次重排。
+      if (_retryEpoch[url] != epoch) {
         _retryAttempts.remove(url);
         return;
       }
       await taskPersistProvider.update(again..status = 0);
+      if (_retryEpoch[url] != epoch) {
+        _retryAttempts.remove(url);
+        return;
+      }
       await save(url, again.toIllusts(), again.fileName);
+      _retryEpoch.remove(url);
     } catch (e) {
       LPrinter.d(e);
       _retryAttempts.remove(url);

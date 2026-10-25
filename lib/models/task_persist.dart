@@ -65,6 +65,7 @@ class TaskPersist {
     data[columnUserId] = this.userId;
     data[columnStatus] = this.status;
     data[columnFileName] = this.fileName;
+    data[columnMedium] = this.medium;
     return data;
   }
 

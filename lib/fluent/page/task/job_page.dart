@@ -110,6 +110,11 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   }
 
   _refresh() async {
+    // 「进行中」是内存+数据库合并的实时列表，不能用 16 条的分页查询覆盖它。
+    if (currentIndex == 1) {
+      await _refreshRunning();
+      return;
+    }
     _page = 0;
     _endOfPage = false;
     final results = await taskPersistProvider.getDownloadTask(
@@ -123,6 +128,10 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   }
 
   _reQueryFilter() async {
+    if (currentIndex == 1) {
+      await _refreshRunning();
+      return;
+    }
     final results = await taskPersistProvider.getDownloadTask(
         _page, toTaskStatus(currentIndex), asc);
     if (mounted) {
@@ -582,7 +591,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
       // 循环期间如果用户清空了所有任务，就不要再把行写回去。
       if (epoch != _jobEpoch) return;
       if (element.status == status) {
-        await _retryJob(element, notify: false);
+        await _retryJob(element, notify: false, epoch: epoch);
       }
     }
     if (mounted) await _refresh();
@@ -608,7 +617,14 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
       if (found == null) return;
       target = found;
     }
-    await taskPersistProvider.remove(target.id!);
+    final removed = await taskPersistProvider.remove(target.id!);
+    if (removed == 0) {
+      // 列表里的 id 可能是旧的（比如经「已在队列」气泡重新保存过），按 url 再删一次。
+      final again = await taskPersistProvider.getAccount(target.url);
+      if (again != null && again.id != null) {
+        await taskPersistProvider.remove(again.id!);
+      }
+    }
     fetcher.jobMaps.remove(target.url);
     fetcher.queue.removeWhere((element) => element.url == target.url);
     fetcher.resetRetry(target.url);
@@ -621,15 +637,19 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
     }
   }
 
-  Future _retryJob(TaskPersist persist, {bool notify = true}) async {
+  Future _retryJob(TaskPersist persist, {bool notify = true, int? epoch}) async {
     // 以数据库里的最新状态为准：列表里的对象可能是旧的（例如刚重试过的那条）。
     final latest = await taskPersistProvider.getAccount(persist.url);
     if (latest == null) return;
     // 2 = 已完成，1 = 正在下载 / 写相册 / 等自动重试；重试会重复导入同一张图。
     if (latest.status == 2 || latest.status == 1) return;
     if (fetcher.isActive(latest.url)) return;
+    if (epoch != null && epoch != _jobEpoch) return;
     await _deleteJob(latest, notify: notify);
+    // 删除是异步的：期间如果用户清空了任务，就不要再把行写回去。
+    if (epoch != null && epoch != _jobEpoch) return;
     await taskPersistProvider.insert(latest..status = 0);
+    if (epoch != null && epoch != _jobEpoch) return;
     fetcher.resetRetry(latest.url);
     await fetcher.save(latest.url, latest.toIllusts(), latest.fileName);
     if (notify) await _refresh();
