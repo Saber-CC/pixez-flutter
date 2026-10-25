@@ -72,23 +72,40 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
   }
 
   _fetchLocal() async {
-    if (mounted) {
-      setState(() {
-        if (currentIndex == 1) {
-          _list = fetcher.queue
-              .where((element) => fetcher.urlPool.contains(element.url))
-              .map((e) => TaskPersist(
-                  userName: e.illusts?.user.name ?? "",
-                  title: e.illusts?.title ?? "",
-                  url: e.url ?? "",
-                  userId: e.illusts?.user.id ?? 0,
-                  illustId: e.illusts?.id ?? 0,
-                  fileName: e.fileName ?? "",
-                  status: 1))
-              .toList();
-        }
-      });
+    if (!mounted || currentIndex != 1) return;
+    await _refreshRunning();
+  }
+
+  /// 「进行中」= 正在下载的（内存队列里在跑的）+ 正在写相册的（数据库里 status 1）。
+  ///
+  /// 缓存命中时下载只要几十毫秒，只靠内存队列这个页签几乎永远是空的；
+  /// 写相册那一段才是真正的长尾，所以要从数据库里补上。
+  Future<void> _refreshRunning() async {
+    final downloading = fetcher.queue
+        .where((element) => fetcher.urlPool.contains(element.url))
+        .map((e) => TaskPersist(
+            userName: e.illusts?.user.name ?? "",
+            title: e.illusts?.title ?? "",
+            url: e.url ?? "",
+            userId: e.illusts?.user.id ?? 0,
+            illustId: e.illusts?.id ?? 0,
+            fileName: e.fileName ?? "",
+            status: 1))
+        .toList();
+    var saving = <TaskPersist>[];
+    try {
+      saving = await taskPersistProvider.getDownloadTask(0, 1, false);
+    } catch (e) {
+      print(e);
     }
+    if (!mounted || currentIndex != 1) return;
+    final urls = downloading.map((e) => e.url).toSet();
+    setState(() {
+      _list = [
+        ...downloading,
+        ...saving.where((e) => !urls.contains(e.url)),
+      ];
+    });
   }
 
   _refresh() async {
@@ -298,22 +315,12 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
           _scrollController.jumpTo(0);
           setState(() {
             this.currentIndex = index;
-            if (currentIndex == 1) {
-              _list = fetcher.queue
-                  .where((element) => fetcher.urlPool.contains(element.url))
-                  .map((e) => TaskPersist(
-                      userName: e.illusts?.user.name ?? "",
-                      title: e.illusts?.title ?? "",
-                      url: e.url ?? "",
-                      userId: e.illusts?.user.id ?? 0,
-                      illustId: e.illusts?.id ?? 0,
-                      fileName: e.fileName ?? "",
-                      status: 1))
-                  .toList();
-            } else {
-              _refresh();
-            }
           });
+          if (index == 1) {
+            _refreshRunning();
+          } else {
+            _refresh();
+          }
         },
       ),
     );
