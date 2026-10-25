@@ -254,7 +254,12 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
         icon: Icon(Icons.more_vert),
         onPressed: () async {
           // 打开菜单前先取一次各状态的数量，展示在菜单最上面。
-          final counts = await taskPersistProvider.countByStatus();
+          var counts = <int, int>{};
+          try {
+            counts = await taskPersistProvider.countByStatus();
+          } catch (e) {
+            print(e);
+          }
           if (!mounted) return;
           await showModalBottomSheet(
               context: context,
