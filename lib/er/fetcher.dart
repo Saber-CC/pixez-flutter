@@ -231,7 +231,12 @@ class Fetcher {
     await taskPersistProvider.update(taskPersist..status = 2);
     File file = File(savePath + Platform.pathSeparator + fileName);
     final uint8list = await file.readAsBytes();
-    await saveStore.saveToGallery(uint8list, illusts, fileName);
+    await saveStore.saveToGallery(
+      uint8list,
+      illusts,
+      fileName,
+      sourceUrl: url,
+    );
     Toaster.downloadOk("${illusts.title} ${I18n.of(context!).saved}");
     var job = jobMaps[url];
     if (job != null) {

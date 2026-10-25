@@ -20,8 +20,9 @@ struct DocumentPlugin {
                 let args = call.arguments as? [String:Any]
                 let data  = args?["data"] as! FlutterStandardTypedData
                 let name = args?["name"] as! String
+                let createMillis = (args?["create_millis"] as? NSNumber)?.int64Value
                 let sData = Data(data.data)
-                save(sData, name: name, in: name.contains("sanity") ? "pxez_sanity" : "pxez")
+                save(sData, name: name, in: name.contains("sanity") ? "pxez_sanity" : "pxez", createMillis: createMillis)
                 result(true)
                 return
             } else if call.method == "permissionStatus" {
@@ -48,19 +49,19 @@ struct DocumentPlugin {
     
     static var picCacheDir: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Pic", isDirectory: true)
     
-    static func save(_ data: Data,name : String, in dir: String) {
+    static func save(_ data: Data, name: String, in dir: String, createMillis: Int64? = nil) {
         if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
             PHPhotoLibrary.requestAuthorization({ (status) -> Void in
                 if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
                     return
                 }
                 createAlbum(albumName: dir, completion: { assetCollection in
-                    self.save(data: data, name: name, assetCollection: assetCollection)
+                    self.save(data: data, name: name, assetCollection: assetCollection, createMillis: createMillis)
                 })
             })
         } else {
             createAlbum(albumName: dir, completion: { assetCollection in
-                self.save(data: data, name: name, assetCollection: assetCollection)
+                self.save(data: data, name: name, assetCollection: assetCollection, createMillis: createMillis)
             })
         }
     }
@@ -89,7 +90,7 @@ struct DocumentPlugin {
         return collection.firstObject
     }
     
-    static func save(data:Data,name:String, assetCollection: PHAssetCollection){
+    static func save(data:Data,name:String, assetCollection: PHAssetCollection, createMillis: Int64? = nil){
         if !FileManager.default.fileExists(atPath: picCacheDir.path) {
             do{
                 try FileManager.default.createDirectory(at: picCacheDir, withIntermediateDirectories: true)
@@ -114,6 +115,12 @@ struct DocumentPlugin {
         PHPhotoLibrary.shared().performChanges({
             guard let assetChangeRequest = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileUrl) else {
                 return
+            }
+            // 不设置 creationDate 时，PhotoKit 会从图片元数据里取 EXIF 拍摄时间，
+            // 取不到就用保存时的当前时间，于是同一批下载的图日期参差不齐。
+            // 这里统一写成作品在 pixiv 的发布时间（多页作品按页码 +1s 保证顺序）。
+            if let createMillis = createMillis {
+                assetChangeRequest.creationDate = Date(timeIntervalSince1970: TimeInterval(createMillis) / 1000.0)
             }
             let assetPlaceHolder = assetChangeRequest.placeholderForCreatedAsset
             let albumChangeRequest = PHAssetCollectionChangeRequest(for: assetCollection)

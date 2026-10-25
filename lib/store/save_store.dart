@@ -103,6 +103,56 @@ Future<String> buildSaveFileName(
   return result.toLegal();
 }
 
+/// 从 pixiv 原图 URL 中取出页码。
+///
+/// 例如 `.../125547965_p2.jpg` 返回 2，取不到时返回 0。
+int pageIndexFromUrl(String url) {
+  final match = RegExp(r'_p(\d+)\.').firstMatch(url);
+  if (match == null) return 0;
+  return int.tryParse(match.group(1)!) ?? 0;
+}
+
+/// 从 pixiv 图片 URL 的路径里解析投稿时间（JST）。
+///
+/// 例如 `.../img-original/img/2024/12/26/01/27/47/125547965_p0.jpg`
+/// 里的 2024/12/26 01:27:47 就是投稿时间（UTC+9），与 API 的 create_date 一致。
+/// 任务重试时 Illusts 是由数据库还原的，create_date 为空，可以用它兜底。
+DateTime? uploadDateFromUrl(String url) {
+  final match = RegExp(
+    r'/(\d{4})/(\d{2})/(\d{2})/(\d{2})/(\d{2})/(\d{2})/',
+  ).firstMatch(url);
+  if (match == null) return null;
+  final values = <int>[];
+  for (var i = 1; i <= 6; i++) {
+    final value = int.tryParse(match.group(i)!);
+    if (value == null) return null;
+    values.add(value);
+  }
+  return DateTime.utc(
+    values[0],
+    values[1],
+    values[2],
+    values[3],
+    values[4],
+    values[5],
+  ).subtract(const Duration(hours: 9));
+}
+
+/// 把作品投稿时间换算成写入相册时使用的创建时间（Unix 毫秒）。
+///
+/// 同一作品的多页共享同一个 create_date，而下载是并发的（完成顺序不定），
+/// 所以这里按页码每页加 1 秒偏移，保证相册里的顺序固定为 p0、p1、p2……，
+/// 与下载先后无关。1 秒的差异在相册里看不出来。
+/// [createDate] 为空或无法解析时用 [url] 里的投稿时间兜底，
+/// 都取不到才返回 null，交给平台自己决定。
+int? albumCreateMillis(String? createDate, int pageIndex, {String? url}) {
+  var date = DateTime.tryParse(createDate ?? '');
+  if (date == null && url != null) date = uploadDateFromUrl(url);
+  if (date == null) return null;
+  final offset = pageIndex > 0 ? pageIndex : 0;
+  return date.millisecondsSinceEpoch + offset * Duration.millisecondsPerSecond;
+}
+
 /// 如果用户启用了 [singleFolder]，将 [baseName] 包装到作者子目录中。
 String applySingleFolder(Illusts illust, String baseName) {
   if (userSetting.singleFolder) {
@@ -321,8 +371,9 @@ abstract class _SaveStoreBase with Store {
     String userName,
     int userId,
     int sanityLevel,
-    String fileName,
-  ) async {
+    String fileName, {
+    int? createMillis,
+  }) async {
     if (Platform.isAndroid ||
         Platform.isIOS ||
         Platform.isWindows ||
@@ -343,15 +394,20 @@ abstract class _SaveStoreBase with Store {
             uint8list,
             fileName,
             clearOld: userSetting.isClearOldFormatFile,
+            createMillis: createMillis,
           );
         else
-          DocumentPlugin.save(uint8list, fileName);
+          DocumentPlugin.save(
+            uint8list,
+            fileName,
+            createMillis: createMillis,
+          );
       } catch (e) {
         print(e);
       }
       return;
     } else {
-      DocumentPlugin.save(uint8list, fileName);
+      DocumentPlugin.save(uint8list, fileName, createMillis: createMillis);
     }
   }
 
@@ -367,14 +423,21 @@ abstract class _SaveStoreBase with Store {
   Future<void> saveToGallery(
     Uint8List uint8list,
     Illusts illusts,
-    String fileName,
-  ) async {
+    String fileName, {
+    String? sourceUrl,
+  }) async {
+    final pageIndex = sourceUrl == null ? 0 : pageIndexFromUrl(sourceUrl);
     saveToGalleryWithUser(
       uint8list,
       illusts.user.name,
       illusts.user.id,
       illusts.sanityLevel,
       fileName,
+      createMillis: albumCreateMillis(
+        illusts.createDate,
+        pageIndex,
+        url: sourceUrl,
+      ),
     );
   }
 

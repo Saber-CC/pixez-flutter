@@ -19,13 +19,17 @@ import 'package:pixez/main.dart';
 class DocumentPlugin {
   static const platform = const MethodChannel('com.perol.dev/save');
 
+  /// [createMillis] 是写入相册时使用的创建时间（Unix 毫秒）。
+  /// 目前只有 iOS 端使用它（PHAssetChangeRequest.creationDate），
+  /// 其它平台会忽略这个参数。
   static Future<bool?> save(Uint8List uint8list, String fileName,
-      {bool clearOld = false, int? saveMode}) async {
+      {bool clearOld = false, int? saveMode, int? createMillis}) async {
     return platform.invokeMethod<bool>('save', {
       "data": uint8list,
       "name": fileName,
       "save_mode": saveMode ?? userSetting.saveMode,
-      "clear_old": clearOld
+      "clear_old": clearOld,
+      if (createMillis != null) "create_millis": createMillis,
     });
   }
 
