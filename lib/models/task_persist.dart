@@ -200,6 +200,17 @@ create table $tableAccount (
     return result;
   }
 
+  /// App 启动时把上次异常退出遗留的"保存中"任务退回 seed，方便重试。
+  Future<int> resetRunning() async {
+    final result = await db.update(
+      tableAccount,
+      {columnStatus: 0},
+      where: '$columnStatus = ?',
+      whereArgs: [1],
+    );
+    return result;
+  }
+
   Future<List<TaskPersist>> getAllAccount() async {
     List<Map<String, dynamic>> maps = await db.query(
       tableAccount,

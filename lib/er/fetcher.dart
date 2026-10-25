@@ -92,12 +92,21 @@ class Fetcher {
   TaskPersistProvider taskPersistProvider = TaskPersistProvider();
   LruMap<String, JobEntity> jobMaps = LruMap();
 
+  /// 相册保存串行执行：一次只把一张图交给 PhotoKit，确认它真的写进相册后
+  /// 再处理下一张。这样不会一次灌入上千个导入请求，也能拿到真实的成功/失败。
+  Future<void> _saveChain = Future.value();
+
+  /// 「清空所有任务」时自增，用来丢弃已经排队但还没保存的任务。
+  int _saveGeneration = 0;
+
   Fetcher() {}
 
   start(String pictureSource) async {
     if (receivePort.isBroadcast) return;
     await taskPersistProvider.open();
     await taskPersistProvider.getAllAccount();
+    // 上次进程被杀时留在"保存中"的任务退回 seed，否则它们再也不会被重试。
+    await taskPersistProvider.resetRunning();
     LPrinter.d("Fetcher start");
     receivePort.listen((message) {
       try {
@@ -182,7 +191,13 @@ class Fetcher {
 
   List<String> urlPool = [];
 
+  /// 已下载完但还没确认写进相册的任务数。
+  /// 限制它可以让下载不要跑得太超前，避免临时目录里堆几十 G 的图。
+  int _pendingSaves = 0;
+  static const int _maxPendingSaves = 3;
+
   nextJob() {
+    if (_pendingSaves >= _maxPendingSaves) return;
     if (queue.isNotEmpty && urlPool.length < userSetting.maxRunningTask) {
       TaskBean? first = null;
       for (var i in queue) {
@@ -211,6 +226,7 @@ class Fetcher {
   /// 清空所有任务：丢掉内存里排队/正在下载的任务，并通知下载 isolate
   /// 放弃当前正在传输的文件。数据库里的任务记录由调用方负责删除。
   void clearAll() {
+    _saveGeneration++;
     queue.clear();
     urlPool.clear();
     jobMaps.clear();
@@ -239,25 +255,51 @@ class Fetcher {
   ) async {
     var taskPersist = await taskPersistProvider.getAccount(url);
     if (taskPersist == null) return;
-    await taskPersistProvider.update(taskPersist..status = 2);
-    File file = File(savePath + Platform.pathSeparator + fileName);
-    // 直接把临时文件路径交给原生层，避免把整张图读进内存再过一遍平台通道。
-    await saveStore.saveFileToGallery(
-      file.path,
-      illusts,
-      fileName,
-      sourceUrl: url,
-    );
-    Toaster.downloadOk("${illusts.title} ${I18n.of(context!).saved}");
-    var job = jobMaps[url];
-    if (job != null) {
-      job.status = 2;
-    } else {
-      jobMaps[url] = JobEntity()
-        ..status = 2
-        ..min = 1
-        ..max = 1;
-    }
+    final file = File(savePath + Platform.pathSeparator + fileName);
+    final generation = _saveGeneration;
+    // 先标成"保存中"，这样在相册真正写进去之前不会被当成 seed 再重试一遍。
+    await taskPersistProvider.update(taskPersist..status = 1);
+    _pendingSaves++;
+    _saveChain = _saveChain
+        .then((_) async {
+          try {
+            if (generation != _saveGeneration) {
+              // 任务已被「清空所有任务」丢弃，直接跳过。
+              return;
+            }
+            var saved = false;
+            try {
+              // 直接把临时文件路径交给原生层，避免把整张图读进内存再过一遍平台通道。
+              // 兜底超时：正常单张导入远快于 1 分钟，只有回调彻底丢了才会触发。
+              saved = await saveStore
+                  .saveFileToGallery(file.path, illusts, fileName, sourceUrl: url)
+                  .timeout(const Duration(minutes: 1));
+            } catch (e) {
+              LPrinter.d(e);
+            }
+            await taskPersistProvider.update(taskPersist..status = saved ? 2 : 3);
+            final job = jobMaps[url];
+            if (job != null) {
+              job.status = saved ? 2 : 3;
+            } else {
+              jobMaps[url] = JobEntity()
+                ..status = saved ? 2 : 3
+                ..min = 1
+                ..max = 1;
+            }
+            if (saved) {
+              Toaster.downloadOk("${illusts.title} ${I18n.of(context!).saved}");
+            } else {
+              HapticUtil.error();
+            }
+          } finally {
+            _pendingSaves--;
+            nextJob();
+          }
+        })
+        .catchError((e) {
+          LPrinter.d(e);
+        });
   }
 
   Future<void> _errorD(String url) async {

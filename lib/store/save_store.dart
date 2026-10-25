@@ -383,7 +383,7 @@ abstract class _SaveStoreBase with Store {
     return name;
   }
 
-  Future<void> saveToGalleryWithUser(
+  Future<bool> saveToGalleryWithUser(
     Uint8List uint8list,
     String userName,
     int userId,
@@ -402,25 +402,35 @@ abstract class _SaveStoreBase with Store {
           userId,
           sanityLevel,
         );
-        if (userSetting.isClearOldFormatFile)
-          DocumentPlugin.save(
-            uint8list,
-            target,
-            clearOld: userSetting.isClearOldFormatFile,
-            createMillis: createMillis,
-          );
-        else
-          DocumentPlugin.save(
-            uint8list,
-            target,
-            createMillis: createMillis,
-          );
+        final saved = userSetting.isClearOldFormatFile
+            ? await DocumentPlugin.save(
+                uint8list,
+                target,
+                clearOld: userSetting.isClearOldFormatFile,
+                createMillis: createMillis,
+              )
+            : await DocumentPlugin.save(
+                uint8list,
+                target,
+                createMillis: createMillis,
+              );
+        return saved ?? false;
       } catch (e) {
         print(e);
+        return false;
       }
-      return;
     } else {
-      DocumentPlugin.save(uint8list, fileName, createMillis: createMillis);
+      try {
+        final saved = await DocumentPlugin.save(
+          uint8list,
+          fileName,
+          createMillis: createMillis,
+        );
+        return saved ?? false;
+      } catch (e) {
+        print(e);
+        return false;
+      }
     }
   }
 
@@ -430,7 +440,7 @@ abstract class _SaveStoreBase with Store {
   /// `readAsBytes` 再经平台通道传一遍，Dart 堆和原生堆会各压一份图片，
   /// 连续保存上千张就很容易被系统以内存超限杀掉。走路径就没有这个峰值。
   /// 没有实现 saveFromPath 的平台（Windows / macOS）退回字节通道。
-  Future<void> saveFileToGallery(
+  Future<bool> saveFileToGallery(
     String sourcePath,
     Illusts illusts,
     String fileName, {
@@ -444,7 +454,7 @@ abstract class _SaveStoreBase with Store {
     );
     if (Platform.isIOS || Platform.isAndroid || Platform.isLinux) {
       try {
-        DocumentPlugin.saveFromPath(
+        final saved = await DocumentPlugin.saveFromPath(
           sourcePath,
           _galleryFileName(
             fileName,
@@ -454,14 +464,15 @@ abstract class _SaveStoreBase with Store {
           ),
           createMillis: createMillis,
         );
+        return saved ?? false;
       } catch (e) {
         print(e);
+        return false;
       }
-      return;
     }
     try {
       final uint8list = await File(sourcePath).readAsBytes();
-      await saveToGalleryWithUser(
+      return await saveToGalleryWithUser(
         uint8list,
         illusts.user.name,
         illusts.user.id,
@@ -471,6 +482,7 @@ abstract class _SaveStoreBase with Store {
       );
     } catch (e) {
       print(e);
+      return false;
     }
   }
 
@@ -490,7 +502,7 @@ abstract class _SaveStoreBase with Store {
     String? sourceUrl,
   }) async {
     final pageIndex = sourceUrl == null ? 0 : pageIndexFromUrl(sourceUrl);
-    saveToGalleryWithUser(
+    await saveToGalleryWithUser(
       uint8list,
       illusts.user.name,
       illusts.user.id,

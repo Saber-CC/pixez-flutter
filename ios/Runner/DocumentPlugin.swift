@@ -30,7 +30,12 @@ struct DocumentPlugin {
                 let sourcePath = args?["source_path"] as! String
                 let name = args?["name"] as! String
                 let createMillis = (args?["create_millis"] as? NSNumber)?.int64Value
-                saveFromPath(sourcePath, in: name.contains("sanity") ? "pxez_sanity" : "pxez", createMillis: createMillis)
+                saveFromPath(sourcePath, in: name.contains("sanity") ? "pxez_sanity" : "pxez", createMillis: createMillis) { success in
+                    // PhotoKit 的回调在后台队列上，回复必须回到主线程。
+                    DispatchQueue.main.async {
+                        result(success)
+                    }
+                }
                 result(true)
                 return
             } else if call.method == "permissionStatus" {
@@ -64,17 +69,19 @@ struct DocumentPlugin {
                     return
                 }
                 createAlbum(albumName: dir, completion: { assetCollection in
+                    guard let assetCollection = assetCollection else { return }
                     self.save(data: data, name: name, assetCollection: assetCollection, createMillis: createMillis)
                 })
             })
         } else {
             createAlbum(albumName: dir, completion: { assetCollection in
+                guard let assetCollection = assetCollection else { return }
                 self.save(data: data, name: name, assetCollection: assetCollection, createMillis: createMillis)
             })
         }
     }
     
-    static func createAlbum(albumName: String, completion: @escaping (PHAssetCollection) -> Void) {
+    static func createAlbum(albumName: String, completion: @escaping (PHAssetCollection?) -> Void) {
         if let assetCollection = self.findAlbum(name: albumName) {
             completion(assetCollection)
             return
@@ -82,11 +89,7 @@ struct DocumentPlugin {
         PHPhotoLibrary.shared().performChanges({
             PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: albumName)
         }){ success, error in
-            if success, let assetCollection = self.findAlbum(name: albumName) {
-                completion(assetCollection)
-            } else {
-                
-            }
+            completion(success ? self.findAlbum(name: albumName) : nil)
         }
     }
     
@@ -127,33 +130,42 @@ struct DocumentPlugin {
     ///
     /// 批量保存时每张图只会在 PhotoKit 里打开一次，Dart 堆和原生堆都不用
     /// 各留一份，缓存命中、下载瞬间完成的情况下也不会堆内存。
-    static func saveFromPath(_ path: String, in dir: String, createMillis: Int64? = nil) {
+    static func saveFromPath(_ path: String, in dir: String, createMillis: Int64? = nil, completion: @escaping (Bool) -> Void) {
         if !FileManager.default.fileExists(atPath: path) {
             print("saveFromPath: file not found => \(path)")
+            completion(false)
             return
         }
         let fileUrl = URL(fileURLWithPath: path)
+        let handleAlbum: (PHAssetCollection?) -> Void = { assetCollection in
+            guard let assetCollection = assetCollection else {
+                completion(false)
+                return
+            }
+            self.addAsset(fileUrl: fileUrl, assetCollection: assetCollection, createMillis: createMillis, deleteSourceWhenDone: true) { success in
+                completion(success)
+            }
+        }
         if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
             PHPhotoLibrary.requestAuthorization({ (status) -> Void in
                 if PHPhotoLibrary.authorizationStatus() != PHAuthorizationStatus.authorized {
+                    completion(false)
                     return
                 }
-                createAlbum(albumName: dir, completion: { assetCollection in
-                    self.addAsset(fileUrl: fileUrl, assetCollection: assetCollection, createMillis: createMillis, deleteSourceWhenDone: true)
-                })
+                createAlbum(albumName: dir, completion: handleAlbum)
             })
         } else {
-            createAlbum(albumName: dir, completion: { assetCollection in
-                self.addAsset(fileUrl: fileUrl, assetCollection: assetCollection, createMillis: createMillis, deleteSourceWhenDone: true)
-            })
+            createAlbum(albumName: dir, completion: handleAlbum)
         }
     }
     
-    static func addAsset(fileUrl: URL, assetCollection: PHAssetCollection, createMillis: Int64?, deleteSourceWhenDone: Bool = false) {
+    static func addAsset(fileUrl: URL, assetCollection: PHAssetCollection, createMillis: Int64?, deleteSourceWhenDone: Bool = false, completion: ((Bool) -> Void)? = nil) {
+        var created = false
         PHPhotoLibrary.shared().performChanges({
             guard let assetChangeRequest = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileUrl) else {
                 return
             }
+            created = true
             // 不设置 creationDate 时，PhotoKit 会从图片元数据里取 EXIF 拍摄时间，
             // 取不到就用保存时的当前时间，于是同一批下载的图日期参差不齐。
             // 这里统一写成作品在 pixiv 的发布时间（多页作品按页码 +1s 保证顺序）。
@@ -169,6 +181,7 @@ struct DocumentPlugin {
             if deleteSourceWhenDone {
                 try? FileManager.default.removeItem(at: fileUrl)
             }
+            completion?(success && created)
         })
     }
 }
