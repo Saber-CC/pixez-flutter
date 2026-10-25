@@ -569,6 +569,7 @@ class _JobPageState extends State<JobPage> with SingleTickerProviderStateMixin {
     await _deleteJob(persist, notify: notify);
     final taskPersist = persist;
     await taskPersistProvider.insert(taskPersist);
+    fetcher.resetRetry(persist.url);
     await fetcher.save(persist.url, taskPersist.toIllusts(), persist.fileName);
     if (notify) await _refresh();
   }

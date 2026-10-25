@@ -340,6 +340,8 @@ abstract class _SaveStoreBase with Store {
     );
     try {
       await fetcher.taskPersistProvider.insert(taskPersist);
+      // 用户重新保存时给这张图一份新的自动重试额度。
+      fetcher.resetRetry(url);
       fetcher.save(url, illusts, fileName);
     } catch (e) {}
   }

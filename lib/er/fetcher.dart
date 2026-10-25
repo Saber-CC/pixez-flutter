@@ -158,7 +158,7 @@ class Fetcher {
             }
             fetcher.jobMaps.removeWhere((key, value) => key == taskBean.url);
             nextJob();
-            _errorD(taskBean.url!);
+            _handleDownloadError(taskBean);
             break;
           default:
             break;
@@ -199,6 +199,10 @@ class Fetcher {
   int _pendingSaves = 0;
   static const int _maxPendingSaves = 3;
 
+  /// 下载失败后的自动重试：同一张图最多再试 3 次，间隔 2s / 6s / 15s。
+  static const List<int> _retryDelays = [2, 6, 15];
+  final Map<String, int> _retryAttempts = {};
+
   nextJob() {
     if (_pendingSaves >= _maxPendingSaves) return;
     if (queue.isNotEmpty && urlPool.length < userSetting.maxRunningTask) {
@@ -230,6 +234,7 @@ class Fetcher {
   /// 放弃当前正在传输的文件。数据库里的任务记录由调用方负责删除。
   void clearAll() {
     _saveGeneration++;
+    _retryAttempts.clear();
     queue.clear();
     urlPool.clear();
     jobMaps.clear();
@@ -266,6 +271,7 @@ class Fetcher {
   ) async {
     var taskPersist = await taskPersistProvider.getAccount(url);
     if (taskPersist == null) return;
+    _retryAttempts.remove(url);
     final file = File(savePath + Platform.pathSeparator + fileName);
     final generation = _saveGeneration;
     // 先标成"保存中"，这样在相册真正写进去之前不会被当成 seed 再重试一遍。
@@ -318,6 +324,42 @@ class Fetcher {
           LPrinter.d(e);
         });
   }
+
+  /// 下载失败时先按退避自动重试几次，次数用尽才标记失败。
+  ///
+  /// 之前失败一次就直接 status 3，只能手动点「重试失败任务」；网络抖动、
+  /// 429 限流这种情况重试基本都能过。
+  Future<void> _handleDownloadError(TaskBean taskBean) async {
+    final url = taskBean.url!;
+    final attempt = _retryAttempts[url] ?? 0;
+    if (attempt < _retryDelays.length) {
+      _retryAttempts[url] = attempt + 1;
+      final seconds = _retryDelays[attempt];
+      LPrinter.d(
+          "retry $url in ${seconds}s (${attempt + 1}/${_retryDelays.length})");
+      final persist = await taskPersistProvider.getAccount(url);
+      if (persist == null || persist.status == 2) {
+        _retryAttempts.remove(url);
+        return;
+      }
+      // 先标成"进行中"，免得被「重试所有 seed 任务」再排一遍。
+      await taskPersistProvider.update(persist..status = 1);
+      await Future.delayed(Duration(seconds: seconds));
+      final again = await taskPersistProvider.getAccount(url);
+      if (again == null || again.status == 2) {
+        _retryAttempts.remove(url);
+        return;
+      }
+      await taskPersistProvider.update(again..status = 0);
+      await save(url, again.toIllusts(), again.fileName);
+      return;
+    }
+    _retryAttempts.remove(url);
+    await _errorD(url);
+  }
+
+  /// 用户手动重试时清掉自动重试计数。
+  void resetRetry(String url) => _retryAttempts.remove(url);
 
   Future<void> _errorD(String url) async {
     var taskPersist = await taskPersistProvider.getAccount(url);
